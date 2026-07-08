@@ -1,63 +1,80 @@
-import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class Movie {
-  final int id;
-  final String title;
-  final String overview;
+import 'screens/favorites_screen.dart';
+import 'screens/movies_screen.dart';
+import 'services/favorites_service.dart';
 
-  Movie({required this.id, required this.title, required this.overview});
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
+  final prefs = await SharedPreferences.getInstance();
+  runApp(MyApp(favoritesService: FavoritesService(prefs)));
+}
 
-  factory Movie.fromJson(Map<String, dynamic> json) {
-    return Movie(
-      id: json['id'],
-      title: json['title'],
-      overview: json['overview'],
+class MyApp extends StatelessWidget {
+  final FavoritesService favoritesService;
+
+  const MyApp({super.key, required this.favoritesService});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Popular Movies',
+      theme: ThemeData(colorSchemeSeed: Colors.amber, useMaterial3: true),
+      darkTheme: ThemeData(
+        colorSchemeSeed: Colors.amber,
+        brightness: Brightness.dark,
+        useMaterial3: true,
+      ),
+      themeMode: ThemeMode.system,
+      home: HomeScreen(favoritesService: favoritesService),
     );
   }
 }
 
-class MovieApiService {
-  final Dio _dio = Dio(
-    BaseOptions(
-      baseUrl: 'https://api.themoviedb.org/3',
-      connectTimeout: Duration(seconds: 30),
-      receiveTimeout: Duration(seconds: 30),
-      headers: {
-        'Authorization':
-            'Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI3Zjg1N2Q2ZjYxYWE1ZjM5NjZlYTkwMWI2NzY4ZjUyZiIsIm5iZiI6MTc4MzQwODM3OC4wNzIsInN1YiI6IjZhNGNhNmZhMjc1N2MzYjA5NGZkY2FkMiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.8FsWeVWkDIyyqiVDG-LmUkWFjs7tvT1mtA0Rg1k_UK8',
-        'Accept': 'application/json',
-      },
-    ),
-  );
+class HomeScreen extends StatefulWidget {
+  final FavoritesService favoritesService;
 
-  Future<List> fetchMovies({required int page}) async {
-    try {
-      final response = await _dio.get(
-        '/movie/popular',
-        queryParameters: {'page': page, 'language': 'en-US'},
-      );
-      if (response.statusCode == 200) {
-        return response.data['results'];
-      } else if (response.statusCode == 401) {
-        throw Exception('Invalid Token');
-      } else {
-        throw Exception('Network Error: ${response.statusCode}');
-      }
-    } on DioException catch (e) {
-      throw Exception('Network error: ${e.message}');
-    }
-  }
+  const HomeScreen({super.key, required this.favoritesService});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-void main() async {
-  try {
-    final MovieApiService movieApiService = MovieApiService();
-    final List results = await movieApiService.fetchMovies(page: 1);
-    for (final js in results) {
-      final movie = Movie.fromJson(js);
-      print('${movie.id} - ${movie.title}\n${movie.overview}\n');
-    }
-  } catch (e) {
-    print('error on fetching movies $e');
+class _HomeScreenState extends State<HomeScreen> {
+  int _selectedIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // IndexedStack keeps the movies list (scroll position, loaded pages)
+      // alive while the favorites tab is shown.
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: [
+          MoviesScreen(favoritesService: widget.favoritesService),
+          FavoritesScreen(favoritesService: widget.favoritesService),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) =>
+            setState(() => _selectedIndex = index),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.movie_outlined),
+            selectedIcon: Icon(Icons.movie),
+            label: 'Movies',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.favorite_border),
+            selectedIcon: Icon(Icons.favorite),
+            label: 'Favorites',
+          ),
+        ],
+      ),
+    );
   }
 }
