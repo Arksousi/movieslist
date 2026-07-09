@@ -2,21 +2,62 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'screens/favorites_screen.dart';
-import 'screens/movies_screen.dart';
-import 'services/favorites_service.dart';
+import 'data/datasources/favorites_local_data_source.dart';
+import 'data/datasources/movie_remote_data_source.dart';
+import 'data/repositories/favorites_repository_impl.dart';
+import 'data/repositories/movie_repository_impl.dart';
+import 'domain/usecases/add_favorite.dart';
+import 'domain/usecases/get_favorite_movies.dart';
+import 'domain/usecases/get_movie_details.dart';
+import 'domain/usecases/get_popular_movies.dart';
+import 'domain/usecases/remove_favorite.dart';
+import 'domain/usecases/search_movies.dart';
+import 'presentation/controllers/favorites_controller.dart';
+import 'presentation/screens/favorites_screen.dart';
+import 'presentation/screens/movies_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
+
+  // Composition root: data layer -> domain layer -> presentation layer.
   final prefs = await SharedPreferences.getInstance();
-  runApp(MyApp(favoritesService: FavoritesService(prefs)));
+
+  final movieRepository = MovieRepositoryImpl(MovieRemoteDataSource());
+  final favoritesRepository = FavoritesRepositoryImpl(
+    FavoritesLocalDataSource(prefs),
+  );
+
+  final favoritesController = FavoritesController(
+    GetFavoriteMovies(favoritesRepository),
+    AddFavorite(favoritesRepository),
+    RemoveFavorite(favoritesRepository),
+  );
+  await favoritesController.load();
+
+  runApp(
+    MyApp(
+      getPopularMovies: GetPopularMovies(movieRepository),
+      searchMovies: SearchMovies(movieRepository),
+      getMovieDetails: GetMovieDetails(movieRepository),
+      favoritesController: favoritesController,
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
-  final FavoritesService favoritesService;
+  final GetPopularMovies getPopularMovies;
+  final SearchMovies searchMovies;
+  final GetMovieDetails getMovieDetails;
+  final FavoritesController favoritesController;
 
-  const MyApp({super.key, required this.favoritesService});
+  const MyApp({
+    super.key,
+    required this.getPopularMovies,
+    required this.searchMovies,
+    required this.getMovieDetails,
+    required this.favoritesController,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -29,15 +70,29 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
       themeMode: ThemeMode.system,
-      home: HomeScreen(favoritesService: favoritesService),
+      home: HomeScreen(
+        getPopularMovies: getPopularMovies,
+        searchMovies: searchMovies,
+        getMovieDetails: getMovieDetails,
+        favoritesController: favoritesController,
+      ),
     );
   }
 }
 
 class HomeScreen extends StatefulWidget {
-  final FavoritesService favoritesService;
+  final GetPopularMovies getPopularMovies;
+  final SearchMovies searchMovies;
+  final GetMovieDetails getMovieDetails;
+  final FavoritesController favoritesController;
 
-  const HomeScreen({super.key, required this.favoritesService});
+  const HomeScreen({
+    super.key,
+    required this.getPopularMovies,
+    required this.searchMovies,
+    required this.getMovieDetails,
+    required this.favoritesController,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -54,8 +109,16 @@ class _HomeScreenState extends State<HomeScreen> {
       body: IndexedStack(
         index: _selectedIndex,
         children: [
-          MoviesScreen(favoritesService: widget.favoritesService),
-          FavoritesScreen(favoritesService: widget.favoritesService),
+          MoviesScreen(
+            getPopularMovies: widget.getPopularMovies,
+            searchMovies: widget.searchMovies,
+            getMovieDetails: widget.getMovieDetails,
+            favoritesController: widget.favoritesController,
+          ),
+          FavoritesScreen(
+            favoritesController: widget.favoritesController,
+            getMovieDetails: widget.getMovieDetails,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
