@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release signing material — never commit these. Losing the keystore means no
+# future build can install over an already-installed app, so back it up safely.
+android/key.properties
+*.jks
+*.keystore

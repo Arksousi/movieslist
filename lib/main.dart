@@ -1,98 +1,56 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import 'data/datasources/favorites_local_data_source.dart';
-import 'data/datasources/movie_remote_data_source.dart';
-import 'data/repositories/favorites_repository_impl.dart';
-import 'data/repositories/movie_repository_impl.dart';
-import 'domain/usecases/add_favorite.dart';
-import 'domain/usecases/get_favorite_movies.dart';
-import 'domain/usecases/get_movie_details.dart';
-import 'domain/usecases/get_popular_movies.dart';
-import 'domain/usecases/remove_favorite.dart';
-import 'domain/usecases/search_movies.dart';
-import 'presentation/controllers/favorites_controller.dart';
+import 'core/di/injector.dart';
+import 'presentation/cubits/favorites/favorites_cubit.dart';
+import 'presentation/cubits/movies/movies_cubit.dart';
+import 'presentation/cubits/settings/settings_cubit.dart';
 import 'presentation/screens/favorites_screen.dart';
 import 'presentation/screens/movies_screen.dart';
+import 'presentation/screens/settings_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
-
-  // Composition root: data layer -> domain layer -> presentation layer.
-  final prefs = await SharedPreferences.getInstance();
-
-  final movieRepository = MovieRepositoryImpl(MovieRemoteDataSource());
-  final favoritesRepository = FavoritesRepositoryImpl(
-    FavoritesLocalDataSource(prefs),
-  );
-
-  final favoritesController = FavoritesController(
-    GetFavoriteMovies(favoritesRepository),
-    AddFavorite(favoritesRepository),
-    RemoveFavorite(favoritesRepository),
-  );
-  await favoritesController.load();
-
-  runApp(
-    MyApp(
-      getPopularMovies: GetPopularMovies(movieRepository),
-      searchMovies: SearchMovies(movieRepository),
-      getMovieDetails: GetMovieDetails(movieRepository),
-      favoritesController: favoritesController,
-    ),
-  );
+  await initDependencies();
+  await sl<FavoritesCubit>().load();
+  await sl<SettingsCubit>().load();
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  final GetPopularMovies getPopularMovies;
-  final SearchMovies searchMovies;
-  final GetMovieDetails getMovieDetails;
-  final FavoritesController favoritesController;
-
-  const MyApp({
-    super.key,
-    required this.getPopularMovies,
-    required this.searchMovies,
-    required this.getMovieDetails,
-    required this.favoritesController,
-  });
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Popular Movies',
-      theme: ThemeData(colorSchemeSeed: Colors.amber, useMaterial3: true),
-      darkTheme: ThemeData(
-        colorSchemeSeed: Colors.amber,
-        brightness: Brightness.dark,
-        useMaterial3: true,
-      ),
-      themeMode: ThemeMode.system,
-      home: HomeScreen(
-        getPopularMovies: getPopularMovies,
-        searchMovies: searchMovies,
-        getMovieDetails: getMovieDetails,
-        favoritesController: favoritesController,
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider<FavoritesCubit>.value(value: sl<FavoritesCubit>()),
+        BlocProvider<SettingsCubit>.value(value: sl<SettingsCubit>()),
+        BlocProvider<MoviesCubit>(
+          create: (_) => sl<MoviesCubit>()..loadNextPage(),
+        ),
+      ],
+      child: BlocBuilder<SettingsCubit, ThemeMode>(
+        builder: (context, themeMode) => MaterialApp(
+          title: 'Popular Movies',
+          theme: ThemeData(colorSchemeSeed: Colors.amber, useMaterial3: true),
+          darkTheme: ThemeData(
+            colorSchemeSeed: Colors.amber,
+            brightness: Brightness.dark,
+            useMaterial3: true,
+          ),
+          themeMode: themeMode,
+          home: const HomeScreen(),
+        ),
       ),
     );
   }
 }
 
 class HomeScreen extends StatefulWidget {
-  final GetPopularMovies getPopularMovies;
-  final SearchMovies searchMovies;
-  final GetMovieDetails getMovieDetails;
-  final FavoritesController favoritesController;
-
-  const HomeScreen({
-    super.key,
-    required this.getPopularMovies,
-    required this.searchMovies,
-    required this.getMovieDetails,
-    required this.favoritesController,
-  });
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -108,18 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // alive while the favorites tab is shown.
       body: IndexedStack(
         index: _selectedIndex,
-        children: [
-          MoviesScreen(
-            getPopularMovies: widget.getPopularMovies,
-            searchMovies: widget.searchMovies,
-            getMovieDetails: widget.getMovieDetails,
-            favoritesController: widget.favoritesController,
-          ),
-          FavoritesScreen(
-            favoritesController: widget.favoritesController,
-            getMovieDetails: widget.getMovieDetails,
-          ),
-        ],
+        children: const [MoviesScreen(), FavoritesScreen(), SettingsScreen()],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
@@ -135,6 +82,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.favorite_border),
             selectedIcon: Icon(Icons.favorite),
             label: 'Favorites',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Settings',
           ),
         ],
       ),

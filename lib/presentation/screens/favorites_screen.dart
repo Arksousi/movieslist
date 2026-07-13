@@ -1,41 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../domain/entities/movie.dart';
-import '../../domain/usecases/get_movie_details.dart';
-import '../controllers/favorites_controller.dart';
+import '../cubits/favorites/favorites_cubit.dart';
+import '../cubits/favorites/favorites_state.dart';
 import '../widgets/movie_card.dart';
+import '../widgets/movie_grid.dart';
 import 'movie_details_screen.dart';
 
 class FavoritesScreen extends StatelessWidget {
-  final FavoritesController favoritesController;
-  final GetMovieDetails getMovieDetails;
-
-  const FavoritesScreen({
-    super.key,
-    required this.favoritesController,
-    required this.getMovieDetails,
-  });
-
-  void _openDetails(BuildContext context, Movie movie) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MovieDetailsScreen(
-          movie: movie,
-          favoritesController: favoritesController,
-          getMovieDetails: getMovieDetails,
-        ),
-      ),
-    );
-  }
+  const FavoritesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Favorites'), centerTitle: true),
-      body: ListenableBuilder(
-        listenable: favoritesController,
-        builder: (context, _) {
-          final favorites = favoritesController.favorites;
+      body: BlocBuilder<FavoritesCubit, FavoritesState>(
+        builder: (context, state) {
+          final favorites = state.movies;
 
           if (favorites.isEmpty) {
             return const Center(
@@ -53,15 +34,19 @@ class FavoritesScreen extends StatelessWidget {
             );
           }
 
-          return ListView.builder(
+          return GridView.builder(
             padding: const EdgeInsets.all(12),
+            gridDelegate: movieGridDelegate(context),
             itemCount: favorites.length,
             itemBuilder: (context, index) {
               final movie = favorites[index];
               return MovieCard(
                 movie: movie,
-                favoritesController: favoritesController,
-                onTap: () => _openDetails(context, movie),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MovieDetailsScreen(movie: movie),
+                  ),
+                ),
               );
             },
           );

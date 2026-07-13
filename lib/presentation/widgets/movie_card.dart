@@ -1,24 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/entities/movie.dart';
-import '../controllers/favorites_controller.dart';
+import '../cubits/favorites/favorites_cubit.dart';
 
 class MovieCard extends StatelessWidget {
   final Movie movie;
-  final FavoritesController favoritesController;
   final VoidCallback? onTap;
 
-  const MovieCard({
-    super.key,
-    required this.movie,
-    required this.favoritesController,
-    this.onTap,
-  });
+  const MovieCard({super.key, required this.movie, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final isFavorite = favoritesController.isFavorite(movie.id);
-
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
@@ -39,6 +32,8 @@ class MovieCard extends StatelessWidget {
                   children: [
                     Text(
                       movie.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -57,19 +52,33 @@ class MovieCard extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                onPressed: () => favoritesController.toggle(movie),
-                tooltip: isFavorite
-                    ? 'Remove from favorites'
-                    : 'Add to favorites',
-                icon: Icon(
-                  isFavorite ? Icons.favorite : Icons.favorite_border,
-                  color: isFavorite ? Colors.red : null,
-                ),
-              ),
+              _FavoriteButton(movie: movie),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _FavoriteButton extends StatelessWidget {
+  final Movie movie;
+
+  const _FavoriteButton({required this.movie});
+
+  @override
+  Widget build(BuildContext context) {
+    // Rebuilds only when this movie's favorite flag changes.
+    final isFavorite = context.select<FavoritesCubit, bool>(
+      (cubit) => cubit.state.isFavorite(movie.id),
+    );
+
+    return IconButton(
+      onPressed: () => context.read<FavoritesCubit>().toggle(movie),
+      tooltip: isFavorite ? 'Remove from favorites' : 'Add to favorites',
+      icon: Icon(
+        isFavorite ? Icons.favorite : Icons.favorite_border,
+        color: isFavorite ? Colors.red : null,
       ),
     );
   }

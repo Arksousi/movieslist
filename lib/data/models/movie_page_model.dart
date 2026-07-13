@@ -17,4 +17,10 @@ class MoviePageModel extends MoviePage {
       totalPages: json['total_pages'],
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'results': movies.map((m) => MovieModel.fromEntity(m).toJson()).toList(),
+    'page': page,
+    'total_pages': totalPages,
+  };
 }

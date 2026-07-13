@@ -1,33 +1,40 @@
-import 'dart:convert';
-
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../models/movie_model.dart';
 
-/// Persists the favorites list as a JSON string in SharedPreferences.
+/// Persists favorites in SQLite: a `favorites` table referencing the shared
+/// `movies` table, so favorites survive app restarts.
 class FavoritesLocalDataSource {
-  static const _prefsKey = 'favorite_movies';
+  final Database _db;
 
-  final SharedPreferences _prefs;
+  FavoritesLocalDataSource(this._db);
 
-  FavoritesLocalDataSource(this._prefs);
-
-  List<MovieModel> loadFavorites() {
-    final raw = _prefs.getString(_prefsKey);
-    if (raw == null) return [];
-    try {
-      return (jsonDecode(raw) as List)
-          .map((js) => MovieModel.fromJson(js as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      return [];
-    }
+  Future<List<MovieModel>> loadFavorites() async {
+    final rows = await _db.rawQuery('''
+      SELECT m.id, m.title, m.overview, m.poster_path
+      FROM favorites f
+      JOIN movies m ON m.id = f.movie_id
+      ORDER BY f.added_at
+    ''');
+    // Column names match the TMDB JSON keys, so fromJson parses a DB row too.
+    return rows.map(MovieModel.fromJson).toList();
   }
 
-  Future<void> saveFavorites(List<MovieModel> movies) async {
-    await _prefs.setString(
-      _prefsKey,
-      jsonEncode(movies.map((m) => m.toJson()).toList()),
-    );
+  Future<void> addFavorite(MovieModel movie) async {
+    await _db.transaction((txn) async {
+      await txn.insert(
+        'movies',
+        movie.toJson(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      await txn.insert('favorites', {
+        'movie_id': movie.id,
+        'added_at': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+  }
+
+  Future<void> removeFavorite(int movieId) async {
+    await _db.delete('favorites', where: 'movie_id = ?', whereArgs: [movieId]);
   }
 }

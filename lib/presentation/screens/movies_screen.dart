@@ -1,54 +1,49 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../domain/entities/movie.dart';
-import '../../domain/usecases/get_movie_details.dart';
-import '../../domain/usecases/get_popular_movies.dart';
-import '../../domain/usecases/search_movies.dart';
-import '../controllers/favorites_controller.dart';
+import '../../domain/entities/movie_category.dart';
+import '../cubits/movies/movies_cubit.dart';
+import '../cubits/movies/movies_state.dart';
 import '../widgets/movie_card.dart';
+import '../widgets/movie_grid.dart';
 import '../widgets/skeleton_movie_card.dart';
 import 'movie_details_screen.dart';
 
-class MoviesScreen extends StatefulWidget {
-  final GetPopularMovies getPopularMovies;
-  final SearchMovies searchMovies;
-  final GetMovieDetails getMovieDetails;
-  final FavoritesController favoritesController;
+/// Tab labels for the browsable categories. The TMDB path lives in the data
+/// layer; only the wording belongs here.
+extension on MovieCategory {
+  String get label => switch (this) {
+    MovieCategory.popular => 'Popular',
+    MovieCategory.topRated => 'Top Rated',
+    MovieCategory.nowPlaying => 'Now Playing',
+    MovieCategory.upcoming => 'Upcoming',
+  };
+}
 
-  const MoviesScreen({
-    super.key,
-    required this.getPopularMovies,
-    required this.searchMovies,
-    required this.getMovieDetails,
-    required this.favoritesController,
-  });
+class MoviesScreen extends StatefulWidget {
+  const MoviesScreen({super.key});
 
   @override
   State<MoviesScreen> createState() => _MoviesScreenState();
 }
 
-class _MoviesScreenState extends State<MoviesScreen> {
+class _MoviesScreenState extends State<MoviesScreen>
+    with SingleTickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
-
-  final List<Movie> _movies = [];
-  String _query = '';
-  // Incremented whenever the list is reset (new search, refresh) so that
-  // responses from stale in-flight requests can be discarded.
-  int _generation = 0;
-  int _currentPage = 0;
-  bool _hasMore = true;
-  bool _isLoading = false;
-  String? _errorMessage;
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _loadNextPage();
+    _tabController = TabController(
+      length: MovieCategory.values.length,
+      vsync: this,
+    );
   }
 
   @override
@@ -56,14 +51,26 @@ class _MoviesScreenState extends State<MoviesScreen> {
     _searchDebounce?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
+    _tabController.dispose();
     super.dispose();
+  }
+
+  /// Switching category abandons any in-progress search and starts the new
+  /// list from the top.
+  void _onCategorySelected(int index) {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    FocusScope.of(context).unfocus();
+    setState(() {}); // hides the search field's clear button
+    context.read<MoviesCubit>().setCategory(MovieCategory.values[index]);
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
   }
 
   void _onScroll() {
     // Start fetching a bit before the user actually hits the bottom.
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 400) {
-      _loadNextPage();
+      context.read<MoviesCubit>().loadNextPage();
     }
   }
 
@@ -71,163 +78,148 @@ class _MoviesScreenState extends State<MoviesScreen> {
     setState(() {}); // updates the clear button
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 400), () {
-      final query = text.trim();
-      if (query == _query) return;
-      _query = query;
-      _resetAndLoad();
+      if (!mounted) return;
+      context.read<MoviesCubit>().setQuery(text);
     });
   }
 
   void _clearSearch() {
     _searchDebounce?.cancel();
     _searchController.clear();
-    if (_query.isEmpty) {
-      setState(() {});
-      return;
-    }
-    _query = '';
-    _resetAndLoad();
-  }
-
-  Future<void> _resetAndLoad() async {
-    setState(() {
-      _generation++;
-      _movies.clear();
-      _currentPage = 0;
-      _hasMore = true;
-      _isLoading = false;
-      _errorMessage = null;
-    });
-    await _loadNextPage();
-  }
-
-  Future<void> _loadNextPage() async {
-    if (_isLoading || !_hasMore) return; // prevents duplicate calls
-    final generation = _generation;
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final page = _query.isEmpty
-          ? await widget.getPopularMovies(page: _currentPage + 1)
-          : await widget.searchMovies(query: _query, page: _currentPage + 1);
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _movies.addAll(page.movies);
-        _currentPage = page.page;
-        _hasMore = page.hasMore;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _openDetails(Movie movie) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MovieDetailsScreen(
-          movie: movie,
-          favoritesController: widget.favoritesController,
-          getMovieDetails: widget.getMovieDetails,
-        ),
-      ),
-    );
+    setState(() {});
+    context.read<MoviesCubit>().clearSearch();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_query.isEmpty ? 'Popular Movies' : 'Search Results'),
+        title: BlocBuilder<MoviesCubit, MoviesState>(
+          buildWhen: (prev, curr) =>
+              prev.isSearching != curr.isSearching ||
+              prev.category != curr.category,
+          builder: (context, state) => Text(
+            state.isSearching ? 'Search Results' : state.category.label,
+          ),
+        ),
         centerTitle: true,
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(64),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: 'Search movies…',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchController.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.clear),
-                        tooltip: 'Clear search',
-                        onPressed: _clearSearch,
-                      ),
-                filled: true,
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+          preferredSize: const Size.fromHeight(112),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search movies…',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchController.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear),
+                            tooltip: 'Clear search',
+                            onPressed: _clearSearch,
+                          ),
+                    filled: true,
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
                 ),
               ),
-            ),
+              TabBar(
+                controller: _tabController,
+                onTap: _onCategorySelected,
+                isScrollable: true,
+                tabAlignment: TabAlignment.center,
+                tabs: [
+                  for (final category in MovieCategory.values)
+                    Tab(text: category.label),
+                ],
+              ),
+            ],
           ),
         ),
       ),
-      body: _buildBody(),
+      body: BlocBuilder<MoviesCubit, MoviesState>(
+        builder: (context, state) => _buildBody(context, state),
+      ),
     );
   }
 
-  Widget _buildBody() {
-    if (_movies.isEmpty && _isLoading) {
+  Widget _buildBody(BuildContext context, MoviesState state) {
+    final cubit = context.read<MoviesCubit>();
+
+    if (state.movies.isEmpty && state.isLoading) {
       // Skeleton placeholders while the first page loads.
-      return ListView.builder(
+      return GridView.builder(
         padding: const EdgeInsets.all(12),
+        gridDelegate: movieGridDelegate(context),
         itemCount: 6,
         itemBuilder: (context, index) => const SkeletonMovieCard(),
       );
     }
 
-    if (_movies.isEmpty && _errorMessage != null) {
-      return _ErrorView(message: _errorMessage!, onRetry: _loadNextPage);
+    if (state.movies.isEmpty && state.errorMessage != null) {
+      return _ErrorView(
+        message: state.errorMessage!,
+        onRetry: cubit.loadNextPage,
+      );
     }
 
-    if (_movies.isEmpty) {
+    if (state.movies.isEmpty) {
       return Center(
         child: Text(
-          _query.isEmpty ? 'No movies found.' : 'No results for "$_query".',
+          state.isSearching
+              ? 'No results for "${state.query}".'
+              : 'No movies found.',
         ),
       );
     }
 
     return RefreshIndicator(
-      onRefresh: _resetAndLoad,
-      child: ListenableBuilder(
-        listenable: widget.favoritesController,
-        builder: (context, _) => ListView.builder(
-          controller: _scrollController,
-          padding: const EdgeInsets.all(12),
-          itemCount: _movies.length + (_hasMore ? 1 : 0),
-          itemBuilder: (context, index) {
-            if (index >= _movies.length) {
-              return _buildLoadMoreIndicator();
-            }
-            final movie = _movies[index];
-            return MovieCard(
-              movie: movie,
-              favoritesController: widget.favoritesController,
-              onTap: () => _openDetails(movie),
+      onRefresh: cubit.refresh,
+      child: GridView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.all(12),
+        gridDelegate: movieGridDelegate(context),
+        itemCount: state.movies.length + (state.hasMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index >= state.movies.length) {
+            return _LoadMoreIndicator(
+              errorMessage: state.errorMessage,
+              onRetry: cubit.loadNextPage,
             );
-          },
-        ),
+          }
+          final movie = state.movies[index];
+          return MovieCard(
+            movie: movie,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => MovieDetailsScreen(movie: movie),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
+}
 
-  Widget _buildLoadMoreIndicator() {
-    if (_errorMessage != null) {
+class _LoadMoreIndicator extends StatelessWidget {
+  final String? errorMessage;
+  final VoidCallback onRetry;
+
+  const _LoadMoreIndicator({required this.errorMessage, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    if (errorMessage != null) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: Column(
@@ -237,7 +229,7 @@ class _MoviesScreenState extends State<MoviesScreen> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
             TextButton.icon(
-              onPressed: _loadNextPage,
+              onPressed: onRetry,
               icon: const Icon(Icons.refresh),
               label: const Text('Retry'),
             ),

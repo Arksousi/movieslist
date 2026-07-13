@@ -5,11 +5,15 @@ class MovieDetails {
   final int? runtime;
   final List<String> genres;
 
+  /// YouTube video id of the trailer, if the movie has one.
+  final String? trailerKey;
+
   const MovieDetails({
     required this.voteAverage,
     this.releaseDate,
     this.runtime,
     required this.genres,
+    this.trailerKey,
   });
 
   String? get releaseYear => (releaseDate == null || releaseDate!.length < 4)

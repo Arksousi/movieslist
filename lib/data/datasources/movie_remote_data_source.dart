@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import '../../domain/entities/movie_category.dart';
+import '../models/movie_category_api.dart';
 import '../models/movie_details_model.dart';
 import '../models/movie_page_model.dart';
 
@@ -23,9 +25,12 @@ class MovieRemoteDataSource {
             ),
           );
 
-  Future<MoviePageModel> fetchPopular({required int page}) async {
+  Future<MoviePageModel> fetchCategory({
+    required MovieCategory category,
+    required int page,
+  }) async {
     final response = await _dio.get(
-      '/movie/popular',
+      '/movie/${category.path}',
       queryParameters: {'page': page, 'language': 'en-US'},
     );
     return MoviePageModel.fromJson(response.data as Map<String, dynamic>);
@@ -50,7 +55,8 @@ class MovieRemoteDataSource {
   Future<MovieDetailsModel> fetchDetails(int movieId) async {
     final response = await _dio.get(
       '/movie/$movieId',
-      queryParameters: {'language': 'en-US'},
+      // append_to_response bundles the trailer list into the same request.
+      queryParameters: {'language': 'en-US', 'append_to_response': 'videos'},
     );
     return MovieDetailsModel.fromJson(response.data as Map<String, dynamic>);
   }
